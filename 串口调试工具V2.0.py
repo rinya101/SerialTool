@@ -441,23 +441,29 @@ class SerialTool(ctk.CTk):
 
     def _receive_data(self):
         """接收串口数据"""
+        receive_buffer = ""
         while self.is_serial_open:
             try:
                 if self.serial_port and self.serial_port.in_waiting > 0:
                     raw_data = self.serial_port.read(self.serial_port.in_waiting)
                     data = raw_data.decode('utf-8', errors='replace')
-                    # print(f"接收数据: {data}")  # 正常打印一次
                     if data:
                         if not self.debug_mode_var.get():
                             self._append_receive_text(data, "receive")
                         else:
-                            lower_data = data.lower()
-                            match_key = "default"  # 默认值
-                            for key in self.debug_color_dict:
-                                if key != "default" and key in lower_data:
-                                    match_key = key
-                                    break  # 找到就退出，只匹配一次
-                            self._append_receive_text(data, match_key)
+                            receive_buffer += data
+                            while '\n' in receive_buffer:
+                                line, receive_buffer = receive_buffer.split('\n', 1)
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                lower_line = line.lower()
+                                match_key = "default"
+                                for key in self.debug_color_dict:
+                                    if key != "default" and key in lower_line:
+                                        match_key = key
+                                        break
+                                self._append_receive_text(line + "\n", match_key)
                     if self.is_receive_bottom_track:
                         self.text_widget.see("end")
                 time.sleep(0.01)
@@ -465,6 +471,7 @@ class SerialTool(ctk.CTk):
                 if self.is_serial_open:
                     self._append_receive_text(f"{self.system_tag}接收数据出错: {str(e)}\n", "error")
                 break
+
     def _append_receive_text(self, text, tag=None):
         self._configure_text_tags()
         self.text_widget.insert(tk.END, text, tag)
