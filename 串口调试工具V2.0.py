@@ -27,7 +27,12 @@ class SerialTool(ctk.CTk):
         "error"   : "#ff0000",
         "warning" : "#ff9900",
         "debug"   : "#ff9fae",
+        "send"    : "#0099ff",
+        "system"  : "#ae00ff"
     }
+
+    # 接收数据框底部跟踪是否开启
+    is_receive_bottom_track = True
 
     def __init__(self, fg_color=None, **kwargs):
         super().__init__(fg_color, **kwargs)
@@ -51,35 +56,25 @@ class SerialTool(ctk.CTk):
         self.port_display_map = {}  # 显示文本 -> 真实设备名的映射
         self.system_tag = "系统提示："  # 系统提示统一标签
         
-
-
-
-        
         # 界面设置
         self.title('串口调试工具')
         self.geometry('900x600')
         ctk.set_appearance_mode('light')
         #ctk.set_default_font("SimHei", 10)  # 修复：设置中文字体，解决乱码
-        
+        self.iconbitmap("icon.ico")
         # 创建界面组件
         self._create_widgets()
-        
         
         # 初始化串口列表并启动自动扫描线程
         self._update_serial_ports()
         self._start_auto_scan()
         
         # 设置默认值
-        self.baud_rate_combo.set('9600')
+        self.baud_rate_combo.set('115200')
         self.serial_data_bits_combo.set('8')
         self.serial_stop_bits_combo.set('1')
         self.serial_parity_combo.set('None')
         self.serial_send_timer_send_newline.configure(variable=self.timer_send_var)
-        
-        self._append_receive_text("测试 - debug\n", tag = "debug")
-        self._append_receive_text("测试 - info\n", tag = "info")
-        self._append_receive_text("测试 - error\n", tag = "error")
-        self._append_receive_text("测试 - warning\n", tag = "warning")
 
     def _create_widgets(self):
         # 1. 串口配置 + 串口数据输出 框架
@@ -145,11 +140,14 @@ class SerialTool(ctk.CTk):
         self.serial_data_output_frame.pack(fill="both", expand=True, side="right", padx=1, pady=1)
         
         # 创建CTkTextbox并保存其原生Text对象
-        self.serial_info_show_entry = ctk.CTkTextbox(self.serial_data_output_frame)
+        self.serial_info_show_entry = ctk.CTkTextbox(self.serial_data_output_frame,font=("微软雅黑", 20))
         self.serial_info_show_entry.pack(fill="both", expand=True, side="right", padx=(1, 1), pady=(1, 1))
         self.serial_info_show_entry.configure(state="normal")
         # 获取CTkTextbox内部的原生tkinter.Text对象（关键修复）
         self.text_widget = self.serial_info_show_entry._textbox
+        # 鼠标右击 接收框 事件绑定
+        self.serial_info_show_entry.bind("<Button-3>", self.right_click_event)
+        self.serial_info_show_entry.bind("<Control-MouseWheel>", self.ctrl_scroll_increase_font)
 
         # 3. 串口发送数据框架
         self.serial_send_frame = ctk.CTkFrame(self)
@@ -326,6 +324,7 @@ class SerialTool(ctk.CTk):
                 self.auto_scan_thread.join(timeout=1)
             self._append_receive_text(f"{self.system_tag}串口自动扫描已关闭\n", "system")
 
+
     def _update_serial_ports(self):
         """初始化串口列表"""
         try:
@@ -394,7 +393,6 @@ class SerialTool(ctk.CTk):
                 return
 
             baudrate = int(self.baud_rate_combo.get())
-            # 修复：转换数据位/停止位为serial常量
             databits = self._convert_databits(self.serial_data_bits_combo.get())
             stopbits = self._convert_stopbits(self.serial_stop_bits_combo.get())
             parity = self._convert_parity(self.serial_parity_combo.get())
@@ -407,15 +405,15 @@ class SerialTool(ctk.CTk):
                 parity=parity,
                 timeout=0.1
             )
-
+            print(f"⚒️ 打开串口: {self.serial_port.get_settings()}")
             self.is_serial_open = True
-            self._append_receive_text(f"{self.system_tag}成功打开串口: {port} 波特率: {baudrate}\n", "system")
+            self._append_receive_text(f"⚒️ 成功打开串口: {port} 波特率: {baudrate}\n", "system")
             
             self.receive_thread = threading.Thread(target=self._receive_data, daemon=True)
             self.receive_thread.start()
 
         except Exception as e:
-            self._append_receive_text(f"{self.system_tag}打开串口失败: {str(e)}\n", "error")
+            self._append_receive_text(f"🩻 打开串口失败: {str(e)}\n", "error")
             self.is_serial_open = False
             self.serial_port = None
 
@@ -443,31 +441,30 @@ class SerialTool(ctk.CTk):
 
     def _receive_data(self):
         """接收串口数据"""
-        buffer = ''
         while self.is_serial_open:
             try:
                 if self.serial_port and self.serial_port.in_waiting > 0:
-                    data = self.serial_port.read(self.serial_port.in_waiting).decode('utf-8', errors='replace')
+                    raw_data = self.serial_port.read(self.serial_port.in_waiting)
+                    data = raw_data.decode('utf-8', errors='replace')
+                    # print(f"接收数据: {data}")  # 正常打印一次
                     if data:
-                        if not self.debug_mode_var:
+                        if not self.debug_mode_var.get():
                             self._append_receive_text(data, "receive")
                         else:
-                            if data != '\r' or data != '\n':
-                                buffer += data
-                            else:
-                                # 遍历 deubg_color_dict
-                                for key in self.debug_color_dict.items():
-                                    if key in buffer.lower() and key != 'default':
-                                        self._append_receive_text(buffer, key)
-                                    else:
-                                        self._append_receive_text(buffer, "default")
-
+                            lower_data = data.lower()
+                            match_key = "default"  # 默认值
+                            for key in self.debug_color_dict:
+                                if key != "default" and key in lower_data:
+                                    match_key = key
+                                    break  # 找到就退出，只匹配一次
+                            self._append_receive_text(data, match_key)
+                    if self.is_receive_bottom_track:
+                        self.text_widget.see("end")
                 time.sleep(0.01)
             except Exception as e:
                 if self.is_serial_open:
                     self._append_receive_text(f"{self.system_tag}接收数据出错: {str(e)}\n", "error")
                 break
-
     def _append_receive_text(self, text, tag=None):
         self._configure_text_tags()
         self.text_widget.insert(tk.END, text, tag)
@@ -475,15 +472,11 @@ class SerialTool(ctk.CTk):
     def _send_data(self):
         """发送数据"""
         if not self.is_serial_open:
-            #self._append_receive_text(f"{self.system_tag}请先打开串口！\n", "system")
             self._system_message(f"{self.system_tag}请先打开串口！", "error")
             return
         else:
             self._system_message(f"", "error")
-
-
         try:
-            # 修复：用tk.END替换ctk.END
             send_data = self.serial_send_data_text.get("1.0", tk.END).rstrip('\n')
             
             if not send_data:
@@ -494,7 +487,7 @@ class SerialTool(ctk.CTk):
                 send_data += '\n'
             
             self.serial_port.write(send_data.encode('utf-8'))
-            self._append_receive_text(f"{self.system_tag}发送: {send_data}\n", "send")
+            self._append_receive_text(f"⭐ {send_data}\n", "send")
             
         except Exception as e:
             self._append_receive_text(f"{self.system_tag}发送数据失败: {str(e)}\n", "error")
@@ -550,6 +543,25 @@ class SerialTool(ctk.CTk):
                 self.timer_send_var.set(False)
                 break
 
+    def right_click_event(self, event):
+        """ 接收框框被右击 """
+        self.is_receive_bottom_track = not self.is_receive_bottom_track
+    def ctrl_scroll_increase_font(self, event):
+        """Ctrl + 鼠标滚轮向上 → 增大字体"""
+        """Ctrl + 鼠标滚轮向下 → 减小字体"""
+        try:
+            current_font = self.serial_info_show_entry.cget("font")
+            font_size = list(current_font)
+            if event.delta > 0:
+                if font_size[1] < 30:
+                    font_size[1] += 1
+            else:
+                if font_size[1] > 7:
+                    font_size[1] -= 1
+            new_size = tuple(font_size)
+            self.serial_info_show_entry.configure(font = new_size)
+        except Exception as e:
+            print("字体调整失败:", e)
     def _system_message(self, message, tag):
         self.system_tip_label.configure(
             text_color = "purple",
