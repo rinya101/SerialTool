@@ -28,7 +28,8 @@ class SerialTool(ctk.CTk):
         "warning" : "#ff9900",
         "debug"   : "#ff9fae",
         "send"    : "#0099ff",
-        "system"  : "#ae00ff"
+        "system"  : "#ae00ff",
+        "success" : "#00eaff"
     }
 
     # 接收数据框底部跟踪是否开启
@@ -405,6 +406,8 @@ class SerialTool(ctk.CTk):
                 parity=parity,
                 timeout=0.1
             )
+            self.serial_port.dtr = False  # 关闭 DTR（不让它复位ESP32）
+            self.serial_port.rts = False  # 关闭 RTS（不让它进下载模式）
             print(f"⚒️ 打开串口: {self.serial_port.get_settings()}")
             self.is_serial_open = True
             self._append_receive_text(f"⚒️ 成功打开串口: {port} 波特率: {baudrate}\n", "system")
